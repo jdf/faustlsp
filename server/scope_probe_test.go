@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,5 +104,50 @@ func TestConcurrentAnalysesOfAnImportingDocument(t *testing.T) {
 	}
 	if !slices.Contains(names, "fi") {
 		t.Errorf("the document's scope lacks the library prefix fi: %v", names)
+	}
+}
+
+// After a library prefix and part of a member's name, the completions are
+// that library's members with that beginning, not the enclosing scope.
+func TestMemberCompletionAfterPartOfAName(t *testing.T) {
+	logging.Init()
+	parser.Init()
+	var files Files
+	files.Init(context.Background(), transport.UTF32)
+	store := Store{Files: &files, Dependencies: NewDependencyGraph(), Cache: make(map[[sha256.Size]byte]*Scope)}
+	ws := Workspace{Root: t.TempDir()}
+	ws.Config.Command = "faust"
+	if _, err := exec.LookPath("faust"); err != nil {
+		t.Skip("the faust command is not installed")
+	}
+	path := util.Path(filepath.Join(ws.Root, "program.dsp"))
+	content := "import(\"stdfaust.lib\");\nprocess = _ : co.com"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files.OpenFromPath(path)
+	f, ok := files.GetFromPath(path)
+	if !ok {
+		t.Fatal("the document did not open")
+	}
+	ws.AnalyzeFile(f, &store)
+	end := transport.Position{Line: 1, Character: uint32(len("process = _ : co.com"))}
+	names := []string{}
+	for _, s := range GetPossibleSymbols(end, path, &store, "utf-32") {
+		names = append(names, s.name)
+	}
+	if !slices.Contains(names, "compressor_mono") {
+		t.Errorf("co.com lacks compressor_mono: %v", names)
+	}
+	for _, name := range names {
+		if !strings.HasPrefix(name, "com") {
+			t.Errorf("co.com offers %q, which does not begin with com", name)
+		}
+	}
+	// At the dot itself every member is offered.
+	dot := transport.Position{Line: 1, Character: uint32(len("process = _ : co."))}
+	all := GetPossibleSymbols(dot, path, &store, "utf-32")
+	if len(all) <= len(names) {
+		t.Errorf("co. offers %d members, co.com %d", len(all), len(names))
 	}
 }

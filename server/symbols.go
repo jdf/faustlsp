@@ -1143,9 +1143,39 @@ func GetPossibleSymbols(pos transport.Position, filePath util.Path, store *Store
 	}
 	logging.Logger.Info("Found identifier at position", "ident", identifier, "scope_range", scope.Range, "len", len(scope.Symbols))
 
-	// 2) Split identifier by '.' to get symbol tree and find scope of last identifier
+	// 2) Split the identifier at its last '.': what precedes it names a
+	// library or environment whose members complete, and what follows it
+	// is the part of a member typed so far. Without a '.', the whole
+	// identifier is the part typed so far and the enclosing scopes complete.
+	partial := identifier
+	if i := strings.LastIndex(identifier, "."); i >= 0 {
+		partial = identifier[i+1:]
+		identifier = identifier[:i+1]
+	} else {
+		identifier = ""
+	}
+	return withPrefix(possibleSymbols(identifier, scope, store), partial)
+}
+
+// The symbols whose names begin with prefix.
+func withPrefix(syms []CompletionSym, prefix string) []CompletionSym {
+	if prefix == "" {
+		return syms
+	}
+	kept := []CompletionSym{}
+	for _, sym := range syms {
+		if strings.HasPrefix(sym.name, prefix) {
+			kept = append(kept, sym)
+		}
+	}
+	return kept
+}
+
+// The symbols that can complete after identifier, which is empty or ends
+// in '.', at scope.
+func possibleSymbols(identifier string, scope *Scope, store *Store) []CompletionSym {
 	if identifier == "" {
-		logging.Logger.Info("No identifier found at position, returning all symbols possible in current scope", "pos", pos, "offset", offset)
+		logging.Logger.Info("No identifier found at position, returning all symbols possible in current scope")
 
 		availableSymbols := []CompletionSym{}
 		for {
@@ -1342,57 +1372,27 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 }
 
 func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding string) (string, *Scope) {
-	// Manual version of FindSymbolScope that doesn't use tree-sitter to find the identifier at the given offset
+	// The identifier being completed is the run of name characters and dots
+	// that ends at the cursor; what follows the cursor is not part of it.
 	// The cursor can sit at the end of the content, one past the last byte.
 	n := uint(len(content))
 	if offset > n {
 		offset = n
 	}
-	i, j := offset, offset
-
-	// Move start till reaches non valid character
-	for {
-		if j >= n {
-			break
-		}
-		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
-			j++
-		} else {
-			break
-		}
+	isIdent := func(b byte) bool {
+		return unicode.IsLetter(rune(b)) || unicode.IsDigit(rune(b)) || b == '.' || b == '_'
 	}
-
-	// Move end till reaches non valid character
-	for {
-		if i == 0 || i >= n {
-			break
-		}
-		if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
-			i--
-		} else {
-			break
-		}
-	}
-	ident := content[i:j]
-	if string(ident) == "" {
-		// Trying to go back from offset to find identifier
+	i := offset
+	for i > 0 && isIdent(content[i-1]) {
 		i--
-		for {
-			if i <= 0 {
-				break
-			}
-			if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
-				i--
-			} else {
-				break
-			}
-		}
-		ident = content[i+1 : j]
 	}
+	ident := content[i:offset]
 
-	//logging.Logger.Info("Found identifier at offset", "ident", string(ident), "start", i+1, "end", j, "offset", offset)
 	start, err := OffsetToPosition(i, string(content), encoding)
-	end, err := OffsetToPosition(j, string(content), encoding)
+	if err != nil {
+		return "", nil
+	}
+	end, err := OffsetToPosition(offset, string(content), encoding)
 	if err != nil {
 		return "", nil
 	}
