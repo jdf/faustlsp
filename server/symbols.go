@@ -116,7 +116,8 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 		if curr == nil {
 			break
 		}
-		if curr.GrammarName() == "function_metadata" || curr.GrammarName() == "global_metadata" {
+		switch curr.GrammarName() {
+		case "function_metadata", "global_metadata", ";":
 			continue
 		}
 		if curr.GrammarName() != "comment" {
