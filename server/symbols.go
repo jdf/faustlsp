@@ -108,11 +108,16 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 	docContent := []string{}
 	curr := node
 
-	// Traverse previous siblings until we find a non-comment node
+	// Traverse previous siblings until we find a non-comment node. The
+	// `declare` statements a library puts between a definition and its
+	// comment are metadata, not a break in the documentation.
 	for {
 		curr = curr.PrevSibling()
 		if curr == nil {
 			break
+		}
+		if curr.GrammarName() == "function_metadata" || curr.GrammarName() == "global_metadata" {
+			continue
 		}
 		if curr.GrammarName() != "comment" {
 			break

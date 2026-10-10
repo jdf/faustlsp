@@ -151,3 +151,32 @@ func TestMemberCompletionAfterPartOfAName(t *testing.T) {
 		t.Errorf("co. offers %d members, co.com %d", len(all), len(names))
 	}
 }
+
+// A definition whose comment is separated from it by `declare` lines still
+// has that comment as its documentation.
+func TestDocumentationPastDeclareLines(t *testing.T) {
+	logging.Init()
+	parser.Init()
+	var files Files
+	files.Init(context.Background(), transport.UTF16)
+	store := Store{Files: &files, Dependencies: NewDependencyGraph(), Cache: make(map[[sha256.Size]byte]*Scope)}
+	ws := Workspace{Root: t.TempDir()}
+	ws.Config.Command = "faust"
+	path := util.Path("/opt/homebrew/share/faust/compressors.lib")
+	files.OpenFromPath(path)
+	f, ok := files.GetFromPath(path)
+	if !ok {
+		t.Skip("compressors.lib is not installed at the Homebrew path")
+	}
+	queue := []string{}
+	ws.ParseFile(f, &store, map[util.Path]struct{}{}, &queue)
+	for _, s := range FindSymbolsNew(f.Scope, "", &store, map[util.Path]struct{}{}) {
+		if s.name == "compressor_stereo" {
+			if !strings.Contains(s.docs.Full, "(co.)compressor_stereo") {
+				t.Errorf("compressor_stereo documentation: %q", s.docs.Full)
+			}
+			return
+		}
+	}
+	t.Error("compressors.lib symbols lack compressor_stereo")
+}
