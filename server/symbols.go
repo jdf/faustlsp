@@ -1354,11 +1354,16 @@ func FindSymbolScope(content []byte, scope *Scope, offset uint) (string, *Scope)
 
 func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding string) (string, *Scope) {
 	// Manual version of FindSymbolScope that doesn't use tree-sitter to find the identifier at the given offset
+	// The cursor can sit at the end of the content, one past the last byte.
+	n := uint(len(content))
+	if offset > n {
+		offset = n
+	}
 	i, j := offset, offset
 
 	// Move start till reaches non valid character
 	for {
-		if j == uint(len(content)-1) {
+		if j >= n {
 			break
 		}
 		if unicode.IsLetter(rune(content[j])) || unicode.IsDigit(rune(content[j])) || content[j] == '.' {
@@ -1370,7 +1375,7 @@ func FindSymbolScopeAtOffset(content []byte, scope *Scope, offset uint, encoding
 
 	// Move end till reaches non valid character
 	for {
-		if i == 0 {
+		if i == 0 || i >= n {
 			break
 		}
 		if unicode.IsLetter(rune(content[i])) || unicode.IsDigit(rune(content[i])) || content[i] == '.' {
