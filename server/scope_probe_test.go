@@ -3,8 +3,12 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/carn181/faustlsp/logging"
 	"github.com/carn181/faustlsp/parser"
@@ -27,7 +31,8 @@ func TestReverbsLibraryScope(t *testing.T) {
 	if !ok {
 		t.Skip("reverbs.lib is not installed at the Homebrew path")
 	}
-	ws.ParseFile(f, &store, map[util.Path]struct{}{}, make(chan string, 1000))
+	queue := []string{}
+	ws.ParseFile(f, &store, map[util.Path]struct{}{}, &queue)
 	names := []string{}
 	for _, s := range FindSymbolsNew(f.Scope, "", &store, map[util.Path]struct{}{}) {
 		names = append(names, s.name)
@@ -52,5 +57,51 @@ func TestIdentifierAtEndOfContent(t *testing.T) {
 	want := transport.Range{Start: transport.Position{Line: 1, Character: 3}, End: transport.Position{Line: 1, Character: 3}}
 	if r != want {
 		t.Errorf("replace range at end of content = %+v, want %+v", r, want)
+	}
+}
+
+// Two analyses of a document that imports the standard library run one
+// after the other without racing on the store or deadlocking on the
+// library files' locks.
+func TestConcurrentAnalysesOfAnImportingDocument(t *testing.T) {
+	logging.Init()
+	parser.Init()
+	var files Files
+	files.Init(context.Background(), transport.UTF32)
+	store := Store{Files: &files, Dependencies: NewDependencyGraph(), Cache: make(map[[sha256.Size]byte]*Scope)}
+	ws := Workspace{Root: t.TempDir()}
+	ws.Config.Command = "faust"
+	if _, err := exec.LookPath("faust"); err != nil {
+		t.Skip("the faust command is not installed")
+	}
+	path := util.Path(filepath.Join(ws.Root, "program.dsp"))
+	if err := os.WriteFile(path, []byte("import(\"stdfaust.lib\");\nprocess = fi.lowpass(2, 1000);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files.OpenFromPath(path)
+	f, ok := files.GetFromPath(path)
+	if !ok {
+		t.Fatal("the document did not open")
+	}
+	done := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		go func() {
+			ws.AnalyzeFile(f, &store)
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Minute):
+			t.Fatal("an analysis never finished")
+		}
+	}
+	names := []string{}
+	for _, s := range FindSymbolsNew(f.Scope, "", &store, map[util.Path]struct{}{}) {
+		names = append(names, s.name)
+	}
+	if !slices.Contains(names, "fi") {
+		t.Errorf("the document's scope lacks the library prefix fi: %v", names)
 	}
 }
