@@ -180,3 +180,32 @@ func TestDocumentationPastDeclareLines(t *testing.T) {
 	}
 	t.Error("compressors.lib symbols lack compressor_stereo")
 }
+
+// A doc block begins at its dashed header; the section banner above it is
+// not documentation.
+func TestDocumentationStartsAtTheHeader(t *testing.T) {
+	logging.Init()
+	parser.Init()
+	var files Files
+	files.Init(context.Background(), transport.UTF16)
+	store := Store{Files: &files, Dependencies: NewDependencyGraph(), Cache: make(map[[sha256.Size]byte]*Scope)}
+	ws := Workspace{Root: t.TempDir()}
+	ws.Config.Command = "faust"
+	path := util.Path("/opt/homebrew/share/faust/misceffects.lib")
+	files.OpenFromPath(path)
+	f, ok := files.GetFromPath(path)
+	if !ok {
+		t.Skip("misceffects.lib is not installed at the Homebrew path")
+	}
+	queue := []string{}
+	ws.ParseFile(f, &store, map[util.Path]struct{}{}, &queue)
+	for _, s := range FindSymbolsNew(f.Scope, "", &store, map[util.Path]struct{}{}) {
+		if s.name == "cubicnl" {
+			if !strings.HasPrefix(strings.TrimSpace(s.docs.Full), "---") || strings.Contains(s.docs.Full, "====") {
+				t.Errorf("cubicnl documentation: %q", s.docs.Full[:min(120, len(s.docs.Full))])
+			}
+			return
+		}
+	}
+	t.Error("misceffects.lib symbols lack cubicnl")
+}

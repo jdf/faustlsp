@@ -117,7 +117,7 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 			break
 		}
 		switch curr.GrammarName() {
-		case "function_metadata", "global_metadata", ";":
+		case "function_metadata", ";":
 			continue
 		}
 		if curr.GrammarName() != "comment" {
@@ -128,6 +128,17 @@ func ParseDocumentation(node *tree_sitter.Node, content []byte) Documentation {
 		lineContent = lineContent[len("//"):]
 		// Double spaces for markdown
 		docContent = slices.Insert(docContent, 0, lineContent)
+	}
+
+	// A library's doc block opens with a dashed line naming the function in
+	// backticks; whatever precedes that line is section banners or the
+	// previous block's tail.
+	for i := len(docContent) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(docContent[i])
+		if strings.HasPrefix(line, "---") && strings.Contains(line, "`") {
+			docContent = docContent[i:]
+			break
+		}
 	}
 
 	usage := ""
